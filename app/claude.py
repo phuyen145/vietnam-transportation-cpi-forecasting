@@ -1215,11 +1215,10 @@ elif page == "Dữ liệu & Tiền xử lý":
         "Xem dữ liệu thô, dữ liệu trung gian, dữ liệu đã xử lý và quy trình tương ứng với các notebook 01-06.",
     )
 
-    tab_raw, tab_interim, tab_processed, tab_process = st.tabs([
+    tab_raw, tab_interim, tab_processed= st.tabs([
         "Raw",
         "Interim",
         "Processed",
-        "Quy trình xử lý",
     ])
 
     # -------------------- RAW --------------------
@@ -1365,43 +1364,7 @@ elif page == "Dữ liệu & Tiền xử lý":
                 processed_path,
                 f"Tải {processed_path.name}",
                 f"download_processed_{processed_path.name}",
-            )
-
-    # -------------------- PROCESS --------------------
-    with tab_process:
-        section_header("Pipeline tiền xử lý", "Notebook 01-06")
-
-        process_df = pd.DataFrame(
-            [
-                {
-                    "Bước": no,
-                    "Nội dung": title,
-                    "Notebook": filename,
-                    "Trạng thái": "Có file" if (NOTEBOOK_DIR / filename).exists() else "Chưa thấy",
-                }
-                for no, title, filename in NOTEBOOKS[:6]
-            ]
-        )
-
-        st.dataframe(
-            process_df,
-            use_container_width=True,
-            hide_index=True,
-        )
-
-        st.markdown(
-            """
-**Quy trình chính**
-
-1. **CPI giao thông:** làm sạch và chuẩn hóa chuỗi CPI theo tháng.  
-2. **Giá xăng dầu:** làm sạch nhiều nguồn, chuẩn hóa giá và ngày hiệu lực.  
-3. **Fuel monthly:** tổng hợp giá xăng dầu theo tháng để đồng bộ tần suất.  
-4. **Brent/WTI:** chuẩn hóa dữ liệu dầu thế giới theo tháng.  
-5. **USD/VND:** chuẩn hóa tỷ giá theo tháng.  
-6. **Dataset integration:** merge các nguồn theo `MonthYear`, kiểm tra missing và phạm vi thời gian.
-"""
-        )
-
+            )    
 
 # ============================================================
 # 14. PAGE — PHÂN TÍCH KHÁM PHÁ
@@ -4098,26 +4061,6 @@ elif page == "Về dự án":
 """
     )
 
-    section_header("Cấu trúc notebook", "01 → 10")
-
-    notebook_table = pd.DataFrame(
-        [
-            {
-                "STT": no,
-                "Nội dung": title,
-                "Notebook": filename,
-                "Trạng thái": "Có" if (NOTEBOOK_DIR / filename).exists() else "Chưa thấy",
-            }
-            for no, title, filename in NOTEBOOKS
-        ]
-    )
-
-    st.dataframe(
-        notebook_table,
-        use_container_width=True,
-        hide_index=True,
-    )
-
     section_header("Phương pháp luận")
 
     st.markdown(
@@ -4141,32 +4084,4 @@ elif page == "Về dự án":
 - Forecast tương lai cần giả định hoặc dự báo trước các biến ngoại sinh.
 - Khi dự báo nhiều bước, lag/rolling/change phải được cập nhật tuần tự theo đúng pipeline huấn luyện.
 """
-    )
-
-    section_header("Trạng thái dữ liệu", "Kiểm tra nhanh project structure")
-
-    status_rows = []
-
-    for label, filename in INTERIM_FILES.items():
-        path = INTERIM_DIR / filename
-        status_rows.append({
-            "Nhóm": "Interim",
-            "File": filename,
-            "Mục đích": label,
-            "Trạng thái": "Sẵn sàng" if path.exists() else "Thiếu file",
-        })
-
-    for label, filename in PROCESSED_FILES.items():
-        path = PROCESSED_DIR / filename
-        status_rows.append({
-            "Nhóm": "Processed",
-            "File": filename,
-            "Mục đích": label,
-            "Trạng thái": "Sẵn sàng" if path.exists() else "Thiếu file",
-        })
-
-    st.dataframe(
-        pd.DataFrame(status_rows),
-        use_container_width=True,
-        hide_index=True,
     )
