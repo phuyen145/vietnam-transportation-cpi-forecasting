@@ -559,6 +559,12 @@ from src.modeling import (
     run_arimax_validation,
     ARIMAX_EXOG_FEATURES,
     run_ensemble_validation,
+
+    run_naive_test,
+    run_elasticnet_test,
+    run_arimax_test,
+    run_ensemble_test,
+    evaluate_test_result,
 )
 
 # ============================================================
@@ -1859,6 +1865,7 @@ elif page == "Mô hình & Kết quả":
         "Test metrics",
         "Actual vs Predicted",
         "Residual",
+        "Mô hình tham chiếu",
     ])
 
     # -------------------- CONFIG --------------------
@@ -2822,228 +2829,1249 @@ elif page == "Mô hình & Kết quả":
 
     # -------------------- VALIDATION --------------------
     with tabs[1]:
+
         st.markdown(
             """
-**Development:** 01/2012 – 12/2021  
-**Expanding-window Validation:** 01/2018 – 12/2021  
-**Số fold:** 48  
-**Test:** 01/2022 – 12/2024, không dùng để tune mô hình.
-"""
+    **Development:** 01/2012 – 12/2021  
+    **Expanding-window Validation:** 01/2018 – 12/2021  
+    **Số fold:** 48  
+    **Test:** 01/2022 – 12/2024, không dùng để tune mô hình.
+    """
         )
 
-        val_df = pd.DataFrame({
-            "Model": list(VALIDATION_RMSE.keys()),
-            "RMSE": list(VALIDATION_RMSE.values()),
-        }).sort_values("RMSE")
+        # =====================================================
+        # 1. GOM CÁC KẾT QUẢ VALIDATION ĐÃ CÓ
+        # =====================================================
 
-        st.dataframe(
-            val_df.style.format({"RMSE": "{:.4f}"}),
-            use_container_width=True,
-            hide_index=True,
-        )
+        validation_rows = []
 
-        st.bar_chart(
-            val_df.set_index("Model")["RMSE"],
-            height=300,
-        )
+        # ---------------- NAIVE ----------------
+        if "naive_result" not in st.session_state:
+            st.session_state.naive_result = run_naive_validation(
+                FEATURE_DATA
+            )
 
-    # -------------------- TEST METRICS --------------------
-    with tabs[2]:
-        if METRICS is None:
-            st.info("Chưa tìm thấy model_evaluation_metrics.csv")
+        validation_rows.append({
+            "Model": "Naive",
+            "Loại": "Mô hình đơn",
+            "RMSE": float(
+                st.session_state.naive_result["rmse"]
+            ),
+        })
+
+        # ---------------- ELASTICNET ----------------
+        if (
+            "elastic_result" in st.session_state
+            and "elastic_config" in st.session_state
+        ):
+            validation_rows.append({
+                "Model": "ElasticNet",
+                "Loại": "Mô hình đơn",
+                "RMSE": float(
+                    st.session_state.elastic_result["rmse"]
+                ),
+            })
+
+        # ---------------- ARIMAX ----------------
+        if (
+            "arimax_result" in st.session_state
+            and "arimax_config" in st.session_state
+        ):
+            validation_rows.append({
+                "Model": "ARIMAX",
+                "Loại": "Mô hình đơn",
+                "RMSE": float(
+                    st.session_state.arimax_result["rmse"]
+                ),
+            })
+
+        # =====================================================
+        # 2. ENSEMBLE ĐÃ CHẠY
+        # =====================================================
+
+        if "ensemble_results" in st.session_state:
+
+            pair_map_validation = {
+                "ElasticNet + ARIMAX": (
+                    "ElasticNet",
+                    "ARIMAX",
+                ),
+                "Naive + ElasticNet": (
+                    "Naive",
+                    "ElasticNet",
+                ),
+                "Naive + ARIMAX": (
+                    "Naive",
+                    "ARIMAX",
+                ),
+            }
+
+            def validation_model_signature(model_name):
+
+                if model_name == "Naive":
+                    return ("Naive",)
+
+                if model_name == "ElasticNet":
+                    return st.session_state.get(
+                        "elastic_config"
+                    )
+
+                if model_name == "ARIMAX":
+                    return st.session_state.get(
+                        "arimax_config"
+                    )
+
+            for pair_name, saved in (
+                st.session_state.ensemble_results.items()
+            ):
+
+                if pair_name not in pair_map_validation:
+                    continue
+
+                model_1, model_2 = (
+                    pair_map_validation[pair_name]
+                )
+
+                saved_signature = saved["signature"]
+
+                # Signature lưu lúc Ensemble được đánh giá:
+                # (
+                #   pair,
+                #   config model 1,
+                #   config model 2,
+                #   weight 1,
+                #   weight 2
+                # )
+
+                current_model_1_signature = (
+                    validation_model_signature(model_1)
+                )
+
+                current_model_2_signature = (
+                    validation_model_signature(model_2)
+                )
+
+                # Nếu ElasticNet / ARIMAX đã đổi cấu hình
+                # thì Ensemble cũ không còn hợp lệ
+                is_current = (
+                    saved_signature[0] == pair_name
+                    and saved_signature[1]
+                    == current_model_1_signature
+                    and saved_signature[2]
+                    == current_model_2_signature
+                )
+
+                if not is_current:
+                    continue
+
+                ensemble_result = saved["result"]
+
+                validation_rows.append({
+                    "Model": pair_name,
+                    "Loại": "Ensemble",
+                    "RMSE": float(
+                        ensemble_result["rmse"]
+                    ),
+                })
+
+        # =====================================================
+        # 3. HIỂN THỊ BẢNG SO SÁNH
+        # =====================================================
+
+        val_df = pd.DataFrame(validation_rows)
+
+        if val_df.empty:
+
+            st.info(
+                "Chưa có kết quả Validation để so sánh."
+            )
+
         else:
-            metric_view = METRICS.copy()
 
-            if "RMSE" in metric_view.columns:
-                metric_view = metric_view.sort_values("RMSE")
+            val_df = (
+                val_df
+                .sort_values("RMSE")
+                .reset_index(drop=True)
+            )
 
-            format_map = {}
-
-            for col in metric_view.columns:
-                if col in ["R2", "MAE", "RMSE"]:
-                    format_map[col] = "{:.4f}"
-                elif "%" in str(col) or col in ["MAPE", "DA"]:
-                    format_map[col] = "{:.2f}"
+            val_df.insert(
+                0,
+                "Xếp hạng",
+                range(1, len(val_df) + 1),
+            )
 
             st.dataframe(
-                metric_view.style.format(format_map),
+                val_df.style.format({
+                    "RMSE": "{:.4f}"
+                }),
                 use_container_width=True,
                 hide_index=True,
             )
 
-            st.warning(
-                "MAPE có thể rất cao khi CPI thực tế gần 0 hoặc âm. "
-                "Nên ưu tiên RMSE/MAE và dùng DA như chỉ số bổ sung."
+            # =================================================
+            # 4. MÔ HÌNH TỐT NHẤT
+            # =================================================
+
+            best_row = val_df.iloc[0]
+
+            best_model = best_row["Model"]
+            best_rmse = float(best_row["RMSE"])
+
+            st.success(
+                f"Mô hình có RMSE Validation thấp nhất hiện tại: "
+                f"**{best_model}** — RMSE = **{best_rmse:.4f}**"
             )
 
-            metric_path = PROCESSED_DIR / PROCESSED_FILES["Model evaluation metrics"]
-            download_file_button(
-                metric_path,
-                "Tải model_evaluation_metrics.csv",
-                "download_metrics",
+            # Lưu để bước sau dùng khi fit Development
+            st.session_state.validation_best_model = (
+                best_model
             )
+
+            st.session_state.validation_best_rmse = (
+                best_rmse
+            )
+
+            # =================================================
+            # 5. CHỌN VÀ CHỐT MÔ HÌNH
+            # =================================================
+
+            validated_models = val_df["Model"].tolist()
+
+            # Mặc định chọn mô hình tốt nhất
+            if (
+                "final_model_selector" not in st.session_state
+                or st.session_state.final_model_selector
+                not in validated_models
+            ):
+                st.session_state.final_model_selector = best_model
+
+
+            selected_final_model = button_selector(
+                "Chọn mô hình để chốt",
+                validated_models,
+                "final_model_selector",
+                columns=min(4, len(validated_models)),
+            )
+
+
+            if st.button(
+                "Chốt mô hình",
+                type="primary",
+                use_container_width=True,
+            ):
+
+                selected_row = val_df[
+                    val_df["Model"] == selected_final_model
+                ].iloc[0]
+
+                st.session_state.final_model = (
+                    selected_final_model
+                )
+
+                st.session_state.final_model_validation_rmse = float(
+                    selected_row["RMSE"]
+                )
+
+                # =================================================
+                # LƯU SNAPSHOT CẤU HÌNH ĐÃ CHỐT
+                # =================================================
+
+                if selected_final_model == "Naive":
+
+                    st.session_state.final_model_spec = {
+                        "type": "single",
+                        "model": "Naive",
+                    }
+
+
+                elif selected_final_model == "ElasticNet":
+
+                    alpha_saved, l1_saved, features_saved = (
+                        st.session_state.elastic_config
+                    )
+
+                    st.session_state.final_model_spec = {
+                        "type": "single",
+                        "model": "ElasticNet",
+                        "alpha": float(alpha_saved),
+                        "l1_ratio": float(l1_saved),
+                        "features": list(features_saved),
+                    }
+
+
+                elif selected_final_model == "ARIMAX":
+
+                    p_saved, d_saved, q_saved, exog_saved = (
+                        st.session_state.arimax_config
+                    )
+
+                    st.session_state.final_model_spec = {
+                        "type": "single",
+                        "model": "ARIMAX",
+                        "p": int(p_saved),
+                        "d": int(d_saved),
+                        "q": int(q_saved),
+                        "exog": list(exog_saved),
+                    }
+
+
+                else:
+                    # =============================================
+                    # ENSEMBLE
+                    # =============================================
+
+                    saved_ensemble = (
+                        st.session_state.ensemble_results[
+                            selected_final_model
+                        ]
+                    )
+
+                    ensemble_result = saved_ensemble["result"]
+                    ensemble_signature = saved_ensemble["signature"]
+
+                    model_1 = ensemble_result["model_1"]
+                    model_2 = ensemble_result["model_2"]
+
+                    # Config model 1 / model 2 tại đúng thời điểm
+                    # Ensemble được Validation
+                    config_1 = ensemble_signature[1]
+                    config_2 = ensemble_signature[2]
+
+                    st.session_state.final_model_spec = {
+                        "type": "ensemble",
+
+                        "pair": selected_final_model,
+
+                        "model_1": model_1,
+                        "model_2": model_2,
+
+                        "weight_1": float(
+                            ensemble_result["weight_1"]
+                        ),
+
+                        "weight_2": float(
+                            ensemble_result["weight_2"]
+                        ),
+
+                        "config_1": config_1,
+                        "config_2": config_2,
+                    }
+
+            if "final_model" in st.session_state:
+
+                st.success(
+                    f"Đã chốt mô hình: "
+                    f"**{st.session_state.final_model}** "
+                    f"— Validation RMSE = "
+                    f"**{st.session_state.final_model_validation_rmse:.4f}**"
+                )
+
+    # -------------------- TEST METRICS --------------------
+# -------------------- TEST METRICS --------------------
+    with tabs[2]:
+
+        st.markdown(
+            """
+    **Test:** 01/2022 – 12/2024  
+    Mô hình được fit lại trên toàn bộ **Development 2012–2021** bằng cấu hình đã chốt từ Validation.
+    """
+        )
+
+        # =====================================================
+        # 1. CHƯA CHỐT MODEL
+        # =====================================================
+
+        if "final_model_spec" not in st.session_state:
+
+            st.info(
+                "Chưa có mô hình được chốt. "
+                "Hãy sang tab Validation và bấm 'Chốt mô hình' trước."
+            )
+
+        else:
+
+            final_spec = st.session_state.final_model_spec
+            final_model_name = st.session_state.final_model
+
+            st.success(
+                f"Mô hình đã chốt: **{final_model_name}** "
+                f"— Validation RMSE = "
+                f"**{st.session_state.final_model_validation_rmse:.4f}**"
+            )
+
+            # =================================================
+            # 2. HELPER CHẠY TEST CHO MODEL THÀNH PHẦN
+            # =================================================
+
+            def run_saved_model_test(
+                model_name,
+                config=None,
+            ):
+
+                # ---------------- NAIVE ----------------
+                if model_name == "Naive":
+
+                    return run_naive_test(
+                        FEATURE_DATA
+                    )
+
+                # ---------------- ELASTICNET ----------------
+                if model_name == "ElasticNet":
+
+                    alpha_saved = float(config[0])
+                    l1_saved = float(config[1])
+                    features_saved = list(config[2])
+
+                    return run_elasticnet_test(
+                        FEATURE_DATA,
+                        alpha=alpha_saved,
+                        l1_ratio=l1_saved,
+                        feature_cols=features_saved,
+                    )
+
+                # ---------------- ARIMAX ----------------
+                if model_name == "ARIMAX":
+
+                    p_saved = int(config[0])
+                    d_saved = int(config[1])
+                    q_saved = int(config[2])
+                    exog_saved = list(config[3])
+
+                    return run_arimax_test(
+                        FEATURE_DATA,
+                        p=p_saved,
+                        d=d_saved,
+                        q=q_saved,
+                        exog_cols=exog_saved,
+                    )
+
+            # =================================================
+            # 3. SIGNATURE CẤU HÌNH ĐÃ CHỐT
+            # =================================================
+
+            final_test_signature = repr(
+                final_spec
+            )
+
+            # =================================================
+            # 4. CHẠY TEST
+            # =================================================
+
+            if st.button(
+                "Đánh giá mô hình đã chốt trên Test",
+                type="primary",
+                use_container_width=True,
+            ):
+
+                with st.spinner(
+                    "Đang fit lại Development 2012–2021 và dự báo Test 2022–2024..."
+                ):
+
+                    # =========================================
+                    # SINGLE MODEL
+                    # =========================================
+
+                    if final_spec["type"] == "single":
+
+                        selected_model = final_spec["model"]
+
+                        if selected_model == "Naive":
+
+                            test_result = run_naive_test(
+                                FEATURE_DATA
+                            )
+
+                        elif selected_model == "ElasticNet":
+
+                            test_result = run_elasticnet_test(
+                                FEATURE_DATA,
+                                alpha=final_spec["alpha"],
+                                l1_ratio=final_spec["l1_ratio"],
+                                feature_cols=final_spec["features"],
+                            )
+
+                        elif selected_model == "ARIMAX":
+
+                            test_result = run_arimax_test(
+                                FEATURE_DATA,
+                                p=final_spec["p"],
+                                d=final_spec["d"],
+                                q=final_spec["q"],
+                                exog_cols=final_spec["exog"],
+                            )
+
+                    # =========================================
+                    # ENSEMBLE
+                    # =========================================
+
+                    else:
+
+                        model_1 = final_spec["model_1"]
+                        model_2 = final_spec["model_2"]
+
+                        result_1 = run_saved_model_test(
+                            model_1,
+                            final_spec["config_1"],
+                        )
+
+                        result_2 = run_saved_model_test(
+                            model_2,
+                            final_spec["config_2"],
+                        )
+
+                        test_result = run_ensemble_test(
+                            result_1,
+                            result_2,
+                            final_spec["weight_1"],
+                            final_spec["weight_2"],
+                            model_1,
+                            model_2,
+                        )
+
+                    # =========================================
+                    # METRICS
+                    # =========================================
+
+                    test_metrics = evaluate_test_result(
+                        test_result
+                    )
+
+                    st.session_state.final_test_result = (
+                        test_result
+                    )
+
+                    st.session_state.final_test_metrics = (
+                        test_metrics
+                    )
+
+                    st.session_state.final_test_signature = (
+                        final_test_signature
+                    )
+
+                    st.session_state.final_test_model = (
+                        final_model_name
+                    )
+
+            # =================================================
+            # 5. HIỂN THỊ KẾT QUẢ TEST
+            # =================================================
+
+            if (
+                "final_test_result" in st.session_state
+                and st.session_state.get(
+                    "final_test_signature"
+                ) == final_test_signature
+            ):
+
+                metrics = (
+                    st.session_state.final_test_metrics
+                )
+
+                st.markdown(
+                    f"### Kết quả Test — {final_model_name}"
+                )
+
+                c1, c2, c3, c4, c5 = st.columns(5)
+
+                c1.metric(
+                    "R²",
+                    f"{metrics['R2']:.4f}",
+                )
+
+                c2.metric(
+                    "MAE",
+                    f"{metrics['MAE']:.4f}",
+                )
+
+                c3.metric(
+                    "RMSE",
+                    f"{metrics['RMSE']:.4f}",
+                )
+
+                c4.metric(
+                    "MAPE",
+                    f"{metrics['MAPE (%)']:.2f}%",
+                )
+
+                c5.metric(
+                    "DA",
+                    f"{metrics['DA (%)']:.2f}%",
+                )
+
+                metric_df = pd.DataFrame([
+                    {
+                        "Model": final_model_name,
+                        "R2": metrics["R2"],
+                        "MAE": metrics["MAE"],
+                        "RMSE": metrics["RMSE"],
+                        "MAPE (%)": metrics["MAPE (%)"],
+                        "DA (%)": metrics["DA (%)"],
+                    }
+                ])
+
+                st.dataframe(
+                    metric_df.style.format({
+                        "R2": "{:.4f}",
+                        "MAE": "{:.4f}",
+                        "RMSE": "{:.4f}",
+                        "MAPE (%)": "{:.2f}",
+                        "DA (%)": "{:.2f}",
+                    }),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+
+                st.warning(
+                    "MAPE có thể rất cao khi CPI thực tế gần 0. "
+                    "Nên ưu tiên RMSE/MAE và sử dụng DA như chỉ số bổ sung."
+                )
+
+            elif "final_test_result" in st.session_state:
+
+                st.info(
+                    "Mô hình đã chốt đã thay đổi. "
+                    "Bấm 'Đánh giá mô hình đã chốt trên Test' "
+                    "để chạy lại kết quả."
+                )
 
     # -------------------- ACTUAL VS PREDICTED --------------------
     with tabs[3]:
-        if PREDICTIONS is None:
-            st.error("Chưa tìm thấy model_predictions.csv")
+
+        if "final_test_result" not in st.session_state:
+
+            st.info(
+                "Chưa có kết quả Test. "
+                "Hãy sang tab Test metrics và chạy mô hình đã chốt trước."
+            )
+
         else:
-            model_map = {
-                "Naive": "Naive_Pred",
-                "ElasticNet": "ElasticNet_Pred",
-                "ARIMAX": "ARIMAX_Pred",
-                "Ensemble": "Ensemble_Pred",
-            }
 
-            available_models = [
-                m for m, c in model_map.items()
-                if c in PREDICTIONS.columns
-            ]
+            test_result = st.session_state.final_test_result
+            final_model_name = st.session_state.get(
+                "final_test_model",
+                st.session_state.get("final_model", "Model"),
+            )
 
-            if not available_models:
-                st.warning(
-                    "Không tìm thấy các cột Naive_Pred, ElasticNet_Pred, ARIMAX_Pred hoặc Ensemble_Pred."
+            pred_df = test_result["predictions"].copy()
+
+            pred_df["MonthYear"] = pd.to_datetime(
+                pred_df["MonthYear"],
+                errors="coerce",
+            )
+
+            chart_df = pred_df[
+                ["MonthYear", "Actual", "Prediction"]
+            ].copy()
+
+            chart_df = chart_df.rename(
+                columns={
+                    "Actual": "Thực tế",
+                    "Prediction": "Dự báo",
+                }
+            )
+
+            chart_df = chart_df.set_index("MonthYear")
+
+            st.markdown(
+                f"### Actual vs Predicted — {final_model_name}"
+            )
+
+            with st.container(border=True):
+
+                st.line_chart(
+                    chart_df[
+                        ["Thực tế", "Dự báo"]
+                    ],
+                    height=380,
+                    use_container_width=True,
                 )
-            else:
-                default_model = available_models[0]
 
-                if METRICS is not None and {"Model", "RMSE"}.issubset(METRICS.columns):
-                    best_model = METRICS.sort_values("RMSE").iloc[0]["Model"]
-                    if best_model in available_models:
-                        default_model = best_model
+            # =================================================
+            # BẢNG CHI TIẾT
+            # =================================================
 
-                if "pred_model_selector" not in st.session_state:
-                    st.session_state.pred_model_selector = default_model
+            detail = pred_df[
+                ["MonthYear", "Actual", "Prediction"]
+            ].copy()
 
-                selected_model = button_selector(
-                    "Mô hình",
-                    available_models,
-                    "pred_model_selector",
-                    columns=4,
+            detail["Sai số"] = (
+                pd.to_numeric(
+                    detail["Actual"],
+                    errors="coerce",
                 )
+                -
+                pd.to_numeric(
+                    detail["Prediction"],
+                    errors="coerce",
+                )
+            )
 
-                pred_col = model_map[selected_model]
-                date_col = get_date_column(PREDICTIONS)
+            detail["|Sai số|"] = (
+                detail["Sai số"].abs()
+            )
 
-                cols = [c for c in [date_col, "Actual", pred_col] if c is not None]
+            detail = detail.rename(
+                columns={
+                    "MonthYear": "Tháng",
+                    "Actual": "Thực tế",
+                    "Prediction": "Dự báo",
+                }
+            )
 
-                chart_df = PREDICTIONS[cols].copy()
+            st.dataframe(
+                detail,
+                use_container_width=True,
+                hide_index=True,
+                height=420,
+            )
 
-                if "Actual" in chart_df.columns:
-                    chart_df = chart_df.rename(columns={
-                        "Actual": "Thực tế",
-                        pred_col: selected_model,
-                    })
-
-                    if date_col:
-                        chart_df = chart_df.set_index(date_col)
-
-                    with st.container(border=True):
-                        st.line_chart(
-                            chart_df,
-                            height=380,
-                            use_container_width=True,
-                        )
-
-                    detail = PREDICTIONS[cols].copy()
-                    detail["Sai số"] = (
-                        pd.to_numeric(detail["Actual"], errors="coerce")
-                        - pd.to_numeric(detail[pred_col], errors="coerce")
-                    )
-                    detail["|Sai số|"] = detail["Sai số"].abs()
-
-                    detail = detail.rename(columns={
-                        "Actual": "Thực tế",
-                        pred_col: "Dự báo",
-                    })
-
-                    st.dataframe(
-                        detail,
-                        use_container_width=True,
-                        hide_index=True,
-                        height=420,
-                    )
-
-                    dataframe_download_button(
-                        detail,
-                        f"{selected_model.lower()}_test_predictions.csv",
-                        "download_selected_predictions",
-                    )
+            dataframe_download_button(
+                detail,
+                f"{final_model_name.lower().replace(' ', '_').replace('+', 'plus')}_test_predictions.csv",
+                "download_final_test_predictions",
+            )
 
     # -------------------- RESIDUAL --------------------
     with tabs[4]:
-        if PREDICTIONS is None:
-            st.error("Chưa tìm thấy model_predictions.csv")
+
+        # =====================================================
+        # 1. KIỂM TRA ĐÃ CÓ KẾT QUẢ TEST CHƯA
+        # =====================================================
+
+        if "final_test_result" not in st.session_state:
+
+            st.info(
+                "Chưa có kết quả Test. "
+                "Hãy sang tab Test metrics và chạy mô hình đã chốt trước."
+            )
+
         else:
-            residual_map = {
-                "Naive": "Naive_Pred",
-                "ElasticNet": "ElasticNet_Pred",
-                "ARIMAX": "ARIMAX_Pred",
-                "Ensemble": "Ensemble_Pred",
-            }
 
-            residual_models = [
-                m for m, c in residual_map.items()
-                if c in PREDICTIONS.columns
-            ]
+            test_result = st.session_state.final_test_result
 
-            if "Actual" not in PREDICTIONS.columns or not residual_models:
-                st.warning("Predictions chưa đủ cột để tính residual.")
-            else:
-                residual_model = button_selector(
-                    "Mô hình",
-                    residual_models,
-                    "residual_model_selector",
-                    columns=4,
+            final_model_name = st.session_state.get(
+                "final_test_model",
+                st.session_state.get(
+                    "final_model",
+                    "Model",
+                ),
+            )
+
+            pred_df = test_result["predictions"].copy()
+
+            # =================================================
+            # 2. CHUẨN HÓA DỮ LIỆU
+            # =================================================
+
+            pred_df["MonthYear"] = pd.to_datetime(
+                pred_df["MonthYear"],
+                errors="coerce",
+            )
+
+            pred_df["Actual"] = pd.to_numeric(
+                pred_df["Actual"],
+                errors="coerce",
+            )
+
+            pred_df["Prediction"] = pd.to_numeric(
+                pred_df["Prediction"],
+                errors="coerce",
+            )
+
+            pred_df = pred_df.dropna(
+                subset=[
+                    "MonthYear",
+                    "Actual",
+                    "Prediction",
+                ]
+            )
+
+            # =================================================
+            # 3. TÍNH RESIDUAL
+            # =================================================
+
+            pred_df["Residual"] = (
+                pred_df["Actual"]
+                - pred_df["Prediction"]
+            )
+
+            pred_df["|Residual|"] = (
+                pred_df["Residual"].abs()
+            )
+
+            st.markdown(
+                f"### Residual — {final_model_name}"
+            )
+
+            st.caption(
+                "Residual = Actual − Prediction. "
+                "Residual dương nghĩa là mô hình dự báo thấp hơn thực tế; "
+                "Residual âm nghĩa là mô hình dự báo cao hơn thực tế."
+            )
+
+            # =================================================
+            # 4. BIỂU ĐỒ RESIDUAL
+            # =================================================
+
+            residual_chart = pred_df[
+                ["MonthYear", "Residual"]
+            ].copy()
+
+            residual_chart["Zero"] = 0.0
+
+            residual_chart = residual_chart.set_index(
+                "MonthYear"
+            )
+
+            with st.container(border=True):
+
+                st.line_chart(
+                    residual_chart[
+                        ["Residual", "Zero"]
+                    ],
+                    height=330,
+                    use_container_width=True,
                 )
 
-                pred_col = residual_map[residual_model]
-                date_col = get_date_column(PREDICTIONS)
+            # =================================================
+            # 5. THỐNG KÊ RESIDUAL
+            # =================================================
 
-                residual = (
-                    pd.to_numeric(PREDICTIONS["Actual"], errors="coerce")
-                    - pd.to_numeric(PREDICTIONS[pred_col], errors="coerce")
-                )
+            residual = pred_df["Residual"]
 
-                residual_df = pd.DataFrame({
-                    "Residual": residual,
-                    "Zero": 0.0,
-                })
+            c1, c2, c3 = st.columns(3)
 
-                if date_col:
-                    residual_df.index = PREDICTIONS[date_col]
+            c1.metric(
+                "Residual mean",
+                f"{residual.mean():.4f}",
+            )
 
-                with st.container(border=True):
-                    st.line_chart(
-                        residual_df,
-                        height=330,
-                        use_container_width=True,
-                    )
+            c2.metric(
+                "Residual std",
+                f"{residual.std():.4f}",
+            )
 
-                c1, c2, c3 = st.columns(3)
-                c1.metric("Residual mean", f"{residual.mean():.4f}")
-                c2.metric("Residual std", f"{residual.std():.4f}")
-                c3.metric("Max |Residual|", f"{residual.abs().max():.4f}")
+            c3.metric(
+                "Max |Residual|",
+                f"{residual.abs().max():.4f}",
+            )
+
+            # =================================================
+            # 6. BẢNG CHI TIẾT
+            # =================================================
+
+            st.markdown(
+                "### Chi tiết sai số"
+            )
+
+            residual_detail = pred_df[
+                [
+                    "MonthYear",
+                    "Actual",
+                    "Prediction",
+                    "Residual",
+                    "|Residual|",
+                ]
+            ].copy()
+
+            residual_detail = residual_detail.rename(
+                columns={
+                    "MonthYear": "Tháng",
+                    "Actual": "Thực tế",
+                    "Prediction": "Dự báo",
+                    "Residual": "Sai số",
+                    "|Residual|": "|Sai số|",
+                }
+            )
+
+            st.dataframe(
+                residual_detail,
+                use_container_width=True,
+                hide_index=True,
+                height=420,
+            )
+
+            # =================================================
+            # 7. PHÂN PHỐI RESIDUAL
+            # =================================================
+
+            st.markdown(
+                "### Phân phối Residual"
+            )
+
+            if len(residual.dropna()) >= 2:
 
                 hist = pd.cut(
                     residual.dropna(),
                     bins=12,
                 ).value_counts().sort_index()
 
-                # Interval index không serialize được sang Vega-Lite (JSON) ->
-                # phải convert sang string trước khi vẽ, nếu không st.bar_chart
-                # sẽ crash toàn bộ app với SchemaValidationError.
+                # Interval không serialize trực tiếp sang Vega
                 hist.index = hist.index.astype(str)
 
-                section_header("Phân phối residual", "Histogram dạng bin")
-                st.bar_chart(hist, height=260)
+                st.bar_chart(
+                    hist,
+                    height=280,
+                )
 
+    # -------------------- REFERENCE MODEL --------------------
+    with tabs[5]:
 
-# ============================================================
-# 17. PAGE — DỰ BÁO TƯƠNG LAI
-# Không giả vờ dự báo nếu chưa có model artifact
-# ============================================================
+        st.markdown("## Mô hình tham chiếu của đề tài")
 
+        st.caption(
+            "Kết quả này được xác định từ quy trình xây dựng mô hình gốc "
+            "của đề tài và không thay đổi theo cấu hình do người sử dụng thử nghiệm."
+        )
+
+        # =====================================================
+        # 1. KIỂM TRA FILE KẾT QUẢ GỐC
+        # =====================================================
+
+        if METRICS is None or PREDICTIONS is None:
+
+            st.warning(
+                "Chưa tìm thấy model_evaluation_metrics.csv "
+                "hoặc model_predictions.csv."
+            )
+
+        else:
+
+            # =================================================
+            # 2. XÁC ĐỊNH MODEL CÓ TEST RMSE THẤP NHẤT
+            # =================================================
+
+            reference_metrics = METRICS.copy()
+
+            reference_metrics["RMSE"] = pd.to_numeric(
+                reference_metrics["RMSE"],
+                errors="coerce",
+            )
+
+            reference_metrics = (
+                reference_metrics
+                .dropna(subset=["RMSE"])
+                .sort_values("RMSE")
+                .reset_index(drop=True)
+            )
+
+            best_row = reference_metrics.iloc[0]
+
+            reference_model = best_row["Model"]
+
+            # =================================================
+            # 3. TỔNG QUAN
+            # =================================================
+
+            st.markdown("### Kết quả tốt nhất trên Test 2022–2024")
+
+            c1, c2 = st.columns(2)
+
+            c1.metric(
+                "Mô hình",
+                reference_model,
+            )
+
+            c2.metric(
+                "Test RMSE",
+                f"{best_row['RMSE']:.4f}",
+            )
+
+            st.info(
+                "Trong kết quả đánh giá cuối cùng của đề tài, "
+                f"{reference_model} có RMSE Test thấp nhất. "
+                "Kết quả này được dùng làm mốc tham chiếu cho các cấu hình "
+                "do người sử dụng thử nghiệm."
+            )
+
+            # =================================================
+            # 4. CẤU HÌNH CHUẨN CỦA ĐỀ TÀI
+            # =================================================
+
+            st.markdown("### Cấu hình chuẩn")
+
+            st.write(
+                "**Ensemble = ElasticNet + ARIMAX**"
+            )
+
+            c1, c2 = st.columns(2)
+
+            with c1:
+
+                st.markdown("**ElasticNet**")
+
+                st.write("Alpha: `0.1`")
+                st.write("L1 Ratio: `0.9`")
+
+                st.write(
+                    f"Số feature: `{len(ELASTICNET_FEATURES)}`"
+                )
+
+                with st.expander(
+                    "Xem feature ElasticNet"
+                ):
+
+                    st.dataframe(
+                        pd.DataFrame({
+                            "Feature": ELASTICNET_FEATURES
+                        }),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+            with c2:
+
+                st.markdown("**ARIMAX**")
+
+                st.write("Order: `ARIMA(1, 0, 2)`")
+
+                st.write(
+                    f"Số biến ngoại sinh: "
+                    f"`{len(ARIMAX_EXOG_FEATURES)}`"
+                )
+
+                with st.expander(
+                    "Xem biến ngoại sinh ARIMAX"
+                ):
+
+                    st.dataframe(
+                        pd.DataFrame({
+                            "Biến ngoại sinh":
+                                ARIMAX_EXOG_FEATURES
+                        }),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+
+            # =================================================
+            # 5. TRỌNG SỐ ENSEMBLE
+            # =================================================
+
+            st.markdown("### Trọng số Ensemble")
+
+            c1, c2 = st.columns(2)
+
+            c1.metric(
+                "ElasticNet",
+                f"{ENSEMBLE_WEIGHT_ELASTIC:.4f}",
+            )
+
+            c2.metric(
+                "ARIMAX",
+                f"{ENSEMBLE_WEIGHT_ARIMAX:.4f}",
+            )
+
+            st.code(
+                f"ŷ_Ensemble = "
+                f"{ENSEMBLE_WEIGHT_ELASTIC:.4f} × ŷ_ElasticNet "
+                f"+ "
+                f"{ENSEMBLE_WEIGHT_ARIMAX:.4f} × ŷ_ARIMAX"
+            )
+
+            # =================================================
+            # 6. VALIDATION
+            # =================================================
+
+            st.markdown("### Kết quả Validation")
+
+            validation_reference = pd.DataFrame({
+                "Model": [
+                    "Naive",
+                    "ElasticNet",
+                    "ARIMAX",
+                    "Ensemble",
+                ],
+                "RMSE": [
+                    VALIDATION_RMSE["Naive"],
+                    VALIDATION_RMSE["ElasticNet"],
+                    VALIDATION_RMSE["ARIMAX"],
+                    VALIDATION_RMSE["Ensemble"],
+                ],
+            }).sort_values("RMSE")
+
+            st.dataframe(
+                validation_reference.style.format({
+                    "RMSE": "{:.4f}"
+                }),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            st.caption(
+                "ElasticNet có RMSE Validation thấp nhất; "
+                "Ensemble và ElasticNet có kết quả khá gần nhau "
+                "nên tiếp tục được đánh giá trên Test."
+            )
+
+            # =================================================
+            # 7. TEST METRICS TẤT CẢ MODEL
+            # =================================================
+
+            st.markdown("### So sánh trên Test 2022–2024")
+
+            metric_format = {}
+
+            for col in reference_metrics.columns:
+
+                if col in ["R2", "MAE", "RMSE"]:
+                    metric_format[col] = "{:.4f}"
+
+                elif col in ["MAPE (%)", "DA (%)"]:
+                    metric_format[col] = "{:.2f}"
+
+            st.dataframe(
+                reference_metrics.style.format(
+                    metric_format
+                ),
+                use_container_width=True,
+                hide_index=True,
+            )
+
+            # =================================================
+            # 8. METRIC CỦA MODEL TỐT NHẤT
+            # =================================================
+
+            st.markdown(
+                f"### Chi tiết {reference_model}"
+            )
+
+            c1, c2, c3, c4, c5 = st.columns(5)
+
+            c1.metric(
+                "R²",
+                f"{best_row['R2']:.4f}",
+            )
+
+            c2.metric(
+                "MAE",
+                f"{best_row['MAE']:.4f}",
+            )
+
+            c3.metric(
+                "RMSE",
+                f"{best_row['RMSE']:.4f}",
+            )
+
+            c4.metric(
+                "MAPE",
+                f"{best_row['MAPE (%)']:.2f}%",
+            )
+
+            c5.metric(
+                "DA",
+                f"{best_row['DA (%)']:.2f}%",
+            )
+
+            # =================================================
+            # 9. ACTUAL VS PREDICTED
+            # =================================================
+
+            pred_map = {
+                "Naive": "Naive_Pred",
+                "ElasticNet": "ElasticNet_Pred",
+                "ARIMAX": "ARIMAX_Pred",
+                "Ensemble": "Ensemble_Pred",
+            }
+
+            pred_col = pred_map.get(
+                reference_model
+            )
+
+            if (
+                pred_col is not None
+                and pred_col in PREDICTIONS.columns
+            ):
+
+                reference_pred = (
+                    PREDICTIONS[
+                        ["MonthYear", "Actual", pred_col]
+                    ]
+                    .copy()
+                )
+
+                reference_pred["MonthYear"] = pd.to_datetime(
+                    reference_pred["MonthYear"],
+                    errors="coerce",
+                )
+
+                st.markdown(
+                    "### Actual vs Predicted"
+                )
+
+                chart_df = reference_pred.rename(
+                    columns={
+                        "Actual": "Thực tế",
+                        pred_col: "Dự báo",
+                    }
+                )
+
+                chart_df = chart_df.set_index(
+                    "MonthYear"
+                )
+
+                with st.container(border=True):
+
+                    st.line_chart(
+                        chart_df[
+                            ["Thực tế", "Dự báo"]
+                        ],
+                        height=380,
+                        use_container_width=True,
+                    )
+
+                # =============================================
+                # 10. RESIDUAL
+                # =============================================
+
+                st.markdown("### Residual")
+
+                reference_pred["Residual"] = (
+                    reference_pred["Actual"]
+                    - reference_pred[pred_col]
+                )
+
+                residual_chart = (
+                    reference_pred[
+                        ["MonthYear", "Residual"]
+                    ]
+                    .copy()
+                )
+
+                residual_chart["Zero"] = 0.0
+
+                residual_chart = (
+                    residual_chart
+                    .set_index("MonthYear")
+                )
+
+                with st.container(border=True):
+
+                    st.line_chart(
+                        residual_chart,
+                        height=300,
+                        use_container_width=True,
+                    )
+
+                residual = (
+                    reference_pred["Residual"]
+                )
+
+                c1, c2, c3 = st.columns(3)
+
+                c1.metric(
+                    "Residual mean",
+                    f"{residual.mean():.4f}",
+                )
+
+                c2.metric(
+                    "Residual std",
+                    f"{residual.std():.4f}",
+                )
+
+                c3.metric(
+                    "Max |Residual|",
+                    f"{residual.abs().max():.4f}",
+                )
 # ============================================================
 # 18. PAGE — VỀ DỰ ÁN
 # ============================================================
