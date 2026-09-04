@@ -11,9 +11,6 @@ __pycache__/
 # VS Code
 .vscode/
 
-# Raw data
-data/raw/
-
 # Temporary files
 *.tmp
 *.log
