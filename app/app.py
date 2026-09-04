@@ -1793,32 +1793,65 @@ elif page == "Feature Engineering":
         "download_feature_dataset",
     )
 
-    # Tương quan feature-target như một hỗ trợ giải thích feature
-    if "CPI" in feature_df.columns:
-        numeric_cols = get_numeric_columns(feature_df)
+    # Tương quan feature-target chỉ trên Development 2012–2021
+    corr_feature_df = feature_df.copy()
+
+    date_col_corr = get_date_column(corr_feature_df)
+
+    if date_col_corr is not None:
+        corr_feature_df[date_col_corr] = pd.to_datetime(
+            corr_feature_df[date_col_corr],
+            errors="coerce",
+        )
+
+        corr_feature_df = corr_feature_df[
+            corr_feature_df[date_col_corr] < "2022-01-01"
+        ]
+
+    if "CPI" in corr_feature_df.columns:
+
+        numeric_cols = get_numeric_columns(
+            corr_feature_df
+        )
 
         if "CPI" in numeric_cols:
+
             corr = (
-                feature_df[numeric_cols]
+                corr_feature_df[numeric_cols]
                 .apply(pd.to_numeric, errors="coerce")
                 .corr()["CPI"]
                 .drop(labels=["CPI"], errors="ignore")
                 .dropna()
-                .sort_values(key=np.abs, ascending=False)
+                .sort_values(
+                    key=np.abs,
+                    ascending=False
+                )
                 .head(15)
             )
 
             if not corr.empty:
+
                 section_header(
                     "Feature liên hệ mạnh với CPI",
-                    "Tương quan tuyến tính · không phải feature importance",
+                    "Tương quan trên Development 2012–2021 · "
+                    "không phải feature importance",
                 )
 
-                corr_table = corr.rename("Correlation").reset_index()
-                corr_table.columns = ["Feature", "Correlation"]
+                corr_table = (
+                    corr
+                    .rename("Correlation")
+                    .reset_index()
+                )
+
+                corr_table.columns = [
+                    "Feature",
+                    "Correlation",
+                ]
 
                 st.dataframe(
-                    corr_table.style.format({"Correlation": "{:.3f}"}),
+                    corr_table.style.format({
+                        "Correlation": "{:.3f}"
+                    }),
                     use_container_width=True,
                     hide_index=True,
                 )
