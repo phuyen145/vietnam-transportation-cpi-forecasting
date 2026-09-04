@@ -2201,6 +2201,13 @@ elif page == "Mô hình & Kết quả":
                 ):
                     result = st.session_state.arimax_result
 
+                    predictions_df = result["predictions"].copy()
+
+                    if "Converged" in predictions_df.columns:
+                        predictions_df = predictions_df.drop(
+                            columns=["Converged"]
+                        )
+
                     c1, c2, c3, c4 = st.columns(4)
 
                     c1.metric("p", result["p"])
