@@ -1238,22 +1238,12 @@ elif page == "Dữ liệu & Tiền xử lý":
     with tab_raw:
         raw_sources = list(RAW_FILES.keys())
 
-        button_cols = st.columns(len(raw_sources), gap="small")
-
-        for i, source_name in enumerate(raw_sources):
-            active = st.session_state.raw_source == source_name
-
-            with button_cols[i]:
-                if st.button(
-                    source_name,
-                    key=f"raw_{i}",
-                    type="primary" if active else "secondary",
-                    use_container_width=True,
-                ):
-                    st.session_state.raw_source = source_name
-                    st.rerun()
-
-        raw_name = st.session_state.raw_source
+        raw_name = button_selector(
+            "Chọn nguồn dữ liệu",
+            raw_sources,
+            "raw_source",
+            columns=4,
+        )
 
         candidates = RAW_FILES[raw_name]
         raw_path = None
