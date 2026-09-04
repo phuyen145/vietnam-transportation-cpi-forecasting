@@ -1,8 +1,6 @@
 import numpy as np
 import pandas as pd
 import streamlit as st
-import warnings
-from statsmodels.tools.sm_exceptions import ConvergenceWarning
 
 from sklearn.linear_model import ElasticNet
 from sklearn.preprocessing import StandardScaler
@@ -179,15 +177,10 @@ def run_arimax_validation(
             enforce_invertibility=False,
         )
 
-        with warnings.catch_warnings(record=True) as caught_warnings:
-            warnings.simplefilter("always", ConvergenceWarning)
-
-            fitted = model.fit(
-                disp=False,
-                maxiter=200,
-            )
-
-        converged = fitted.mle_retvals.get("converged", True)
+        fitted = model.fit(
+            disp=False,
+            maxiter=200,
+        )
 
         prediction = fitted.forecast(
             steps=1,
@@ -199,7 +192,6 @@ def run_arimax_validation(
             "MonthYear": str(val_month),
             "Actual": val_fold["CPI"].iloc[0],
             "Prediction": prediction,
-            "Converged": bool(converged),
         })
 
     results_df = pd.DataFrame(results)

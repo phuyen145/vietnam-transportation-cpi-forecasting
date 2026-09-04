@@ -2169,19 +2169,6 @@ elif page == "Mô hình & Kết quả":
                 ):
                     result = st.session_state.arimax_result
 
-                    if "Converged" in result["predictions"].columns:
-
-                        n_failed = (
-                            ~result["predictions"]["Converged"]
-                        ).sum()
-
-                        if n_failed > 0:
-                            st.caption(
-                                f"Lưu ý: {n_failed}/{len(result['predictions'])} "
-                                "fold ARIMAX chưa hội tụ hoàn toàn; "
-                                "các fold này vẫn trả về dự báo."
-                            )
-
                     c1, c2, c3, c4 = st.columns(4)
 
                     c1.metric("p", result["p"])
