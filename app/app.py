@@ -1833,8 +1833,7 @@ elif page == "Feature Engineering":
 
                 section_header(
                     "Feature liên hệ mạnh với CPI",
-                    "Tương quan trên Development 2012–2021 · "
-                    "không phải feature importance",
+                    "Tương quan trên Development 2012–2021",
                 )
 
                 corr_table = (
